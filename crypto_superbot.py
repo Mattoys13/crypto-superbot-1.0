@@ -7,15 +7,16 @@ import threading
 from flask import Flask, request, jsonify, render_template_string
 from sklearn.linear_model import LinearRegression
 from datetime import datetime
+import os
 import openai
 
-# === TWOJE DANE TELEGRAM ===
+# === TELEGRAM ===
 API_KEY = "8330502624:AAEr5TliWy66wQm9EX02OUuGeWoslYjWeUY"
 CHAT_ID = "7743162708"
 bot = telebot.TeleBot(API_KEY)
 
-# === OPENAI GPT ===
-OPENAI_API_KEY = "TU_WKLEJ_SWÓJ_OPENAI_API_KEY"  # <<< TWÓJ KLUCZ OPENAI GPT!
+# === OPENAI GPT z Railway Variables ===
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
 # === KONFIGURACJA ===
@@ -112,6 +113,8 @@ def predict_price(df, steps_ahead=1):
     return prediction[0]
 
 def gpt_comment(coin, current, pred):
+    if not openai.api_key:
+        return "(Brak klucza OPENAI_API_KEY)"
     prompt = (
         f"Predykcja AI dla {coin}:\n"
         f"Aktualna cena: ${current:.2f}, prognoza za 1h: ${pred:.2f}. "
@@ -156,6 +159,8 @@ def fetch_fear_greed():
         return "?", "Brak danych"
 
 def gpt_sentyment(fear_value, fear_class):
+    if not openai.api_key:
+        return "(Brak klucza OPENAI_API_KEY)"
     prompt = (
         f"Indeks Fear & Greed wynosi {fear_value} ({fear_class}). "
         f"Oceń krótko nastroje rynku kryptowalut i czy to sprzyja kupnie/sprzedaży. Odpowiedz po polsku."
