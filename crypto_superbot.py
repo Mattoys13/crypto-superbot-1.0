@@ -22,37 +22,38 @@ openai.api_key = OPENAI_API_KEY
 # === KONFIGURACJA CZĘSTOTLIWOŚCI ===
 PUMP_PERCENT = 5
 PUMP_INTERVAL = 5
-SCAN_INTERVAL = 300        # Pump Detector co 5 minut (zmień według potrzeb)
-AI_PREDICT_INTERVAL = 4*3600  # AI Prediction co 4 godziny (zmień według potrzeb)
+SCAN_INTERVAL = 300        # Pump Detector co 5 minut
+AI_PREDICT_INTERVAL = 4*3600  # AI Prediction co 4 godziny
 DAILY_REPORT_HOUR = 20     # Dzienny raport o 20:00
+TOP10_HOURS = [9, 21]      # TOP10 raport o 9:00 i 21:00
+WATCHLIST_INTERVAL = 900   # Watchlist co 15 min
 
-KRAKEN_PAIRS = ["XBTUSDT", "ETHUSDT", "SOLUSDT"]
-COINBASE_PAIRS = ["BTC-USDT", "ETH-USDT", "SOL-USDT"]
+# === BINANCE PAIRS (Top + Twoje obserwowane) ===
+BINANCE_PAIRS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "TRXUSDT", "XLMUSDT", "EOSUSDT", "HBARUSDT",
+    "LOKAUSDT", "SPXUSDT", "OMNIUSDT", "SUIUSDT", "TRXUSDT", "MDTUSDT", "BLURUSDT", "PNGUSDT", "HOPRUSDT",
+    "ASMUSDT", "BONKUSDT", "PENGUUSDT", "JASMYUSDT", "CLVUSDT", "TRUMPUSDT", "ONDOUSDT", "SPKUSDT", "CFXUSDT", "SAROSUSDT"
+]
 AI_PAIRS = ["BTCUSDT", "ETHUSDT"]
+
+WATCHLIST = [
+    "LOKAUSDT", "SPXUSDT", "OMNIUSDT", "SUIUSDT", "TRXUSDT", "MDTUSDT", "BLURUSDT", "PNGUSDT", "HOPRUSDT", "ASMUSDT",
+    "BONKUSDT", "PENGUUSDT", "JASMYUSDT", "CLVUSDT", "TRUMPUSDT", "EOSUSDT", "ADAUSDT", "XLMUSDT", "ONDOUSDT", "HBARUSDT",
+    "SPKUSDT", "CFXUSDT", "SAROSUSDT"
+]
 
 signals_list = []
 
-# ============== MODUŁ 1: Pump Detector =====================
-def fetch_kraken_ticker(pair):
-    url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval=1"
-    response = requests.get(url).json()
-    if "result" not in response:
-        raise Exception(f"Błąd API Kraken dla pary {pair}: {response}")
-    result = list(response['result'].values())[0]
-    df = pd.DataFrame(result, columns=["time","open","high","low","close","vwap","volume","count"])
+# ============== MODUŁ 1: Pump Detector (BINANCE) =====================
+def fetch_binance_ticker(symbol):
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1m&limit=10"
+    data = requests.get(url).json()
+    if not isinstance(data, list):
+        raise Exception(f"Błąd API Binance ({symbol}): {data}")
+    df = pd.DataFrame(data, columns=["open_time","open","high","low","close","volume","c1","c2","c3","c4","c5","c6"])
     df["close"] = df["close"].astype(float)
     df["volume"] = df["volume"].astype(float)
     return df
-
-def fetch_coinbase_ticker(symbol):
-    url = f"https://api.exchange.coinbase.com/products/{symbol}/candles?granularity=60"
-    response = requests.get(url).json()
-    if not isinstance(response, list):
-        raise Exception(f"Błąd API Coinbase dla pary {symbol}: {response}")
-    df = pd.DataFrame(response, columns=["time","low","high","open","close","volume"])
-    df["close"] = df["close"].astype(float)
-    df["volume"] = df["volume"].astype(float)
-    return df.sort_values("time")
 
 def check_pump(df, symbol):
     recent = df.tail(PUMP_INTERVAL)
@@ -62,32 +63,24 @@ def check_pump(df, symbol):
 
     if price_change >= PUMP_PERCENT or vol_spike:
         msg = f"🚨 *Pump Alert!* {symbol}\n" \
-              f"💰 Cena: ${recent['close'].iloc[-1]:.2f}\n" \
+              f"💰 Cena: ${recent['close'].iloc[-1]:.4f}\n" \
               f"📈 Zmiana: {price_change:.2f}% (ostatnie {PUMP_INTERVAL} min)\n"
         if vol_spike:
             msg += "🔥 Wzrost wolumenu!\n"
-        msg += f"🔗 [Wykres TradingView](https://www.tradingview.com/chart/?symbol={symbol.replace('-', '')})"
+        msg += f"🔗 [Wykres TradingView](https://www.tradingview.com/chart/?symbol={symbol})"
         send_signal("Pump Detector", msg)
 
 def pump_detector_thread():
     print("🟢 Pump Detector start")
-    bot.send_message(CHAT_ID, "✅ Pump Detector uruchomiony!")
+    bot.send_message(CHAT_ID, "✅ Pump Detector uruchomiony (Binance)!")
     while True:
         try:
-            for pair in KRAKEN_PAIRS:
+            for pair in BINANCE_PAIRS:
                 try:
-                    kraken_df = fetch_kraken_ticker(pair)
-                    check_pump(kraken_df, f"Kraken: {pair}")
+                    df = fetch_binance_ticker(pair)
+                    check_pump(df, f"Binance: {pair}")
                 except Exception as e:
-                    print(f"❌ Błąd Kraken ({pair}): {e}")
-
-            for pair in COINBASE_PAIRS:
-                try:
-                    coinbase_df = fetch_coinbase_ticker(pair)
-                    check_pump(coinbase_df, f"Coinbase: {pair}")
-                except Exception as e:
-                    print(f"❌ Błąd Coinbase ({pair}): {e}")
-
+                    print(f"❌ Błąd Binance ({pair}): {e}")
         except Exception as e:
             print(f"❌ Błąd główny PUMP: {e}")
         time.sleep(SCAN_INTERVAL)
@@ -115,7 +108,7 @@ def gpt_comment(coin, current, pred):
         return "(Brak klucza OPENAI_API_KEY)"
     prompt = (
         f"Predykcja AI dla {coin}:\n"
-        f"Aktualna cena: ${current:.2f}, prognoza za 1h: ${pred:.2f}. "
+        f"Aktualna cena: ${current:.4f}, prognoza za 1h: ${pred:.4f}. "
         f"Opisz sentyment/trend rynku i możliwe powody zmiany ceny w 2-3 zdaniach (krótko, rzeczowo, po polsku):"
     )
     try:
@@ -139,7 +132,7 @@ def ai_prediction_thread():
                 current = df["close"].iloc[-1]
                 dt = datetime.now().strftime("%Y-%m-%d %H:%M")
                 komentarz = gpt_comment(coin, current, pred)
-                msg = f"🤖 *AI Predykcja* {coin}\n\nCzas: {dt}\nAktualna cena: ${current:.2f}\nPredykcja za 1h: ${pred:.2f}\n\n💡 _{komentarz}_"
+                msg = f"🤖 *AI Predykcja* {coin}\n\nCzas: {dt}\nAktualna cena: ${current:.4f}\nPredykcja za 1h: ${pred:.4f}\n\n💡 _{komentarz}_"
                 send_signal("AI Prediction", msg)
         except Exception as e:
             print("❌ Błąd AI bota:", e)
@@ -206,13 +199,13 @@ def daily_report_thread():
                 dt = now.strftime('%Y-%m-%d')
                 msg = f"""📅 *Raport dzienny – {dt}*
 
-*BTC:* ${btc:.2f}
-*ETH:* ${eth:.2f}
+*BTC:* ${btc:.4f}
+*ETH:* ${eth:.4f}
 
 😨 *Fear&Greed:* {fg_val} ({fg_class})
 💬 {fg_gpt}
 
-🤖 *AI Predykcja BTC*: ${pred_btc:.2f}
+🤖 *AI Predykcja BTC*: ${pred_btc:.4f}
 💡 {ai_kom}
 
 🚀 *TOP Gainers:*
@@ -227,7 +220,46 @@ def daily_report_thread():
                 print("❌ Błąd raportu dziennego:", e)
         time.sleep(60)
 
-# ============== MODUŁ 5: TradingView Webhook + Dashboard ===========
+# ============== MODUŁ 5: Top10 krypto 2x dziennie ================
+def top10_report_thread():
+    print("🟢 Top10 raport start")
+    last_sent = {h: None for h in TOP10_HOURS}
+    while True:
+        now = datetime.now()
+        for h in TOP10_HOURS:
+            if now.hour == h and last_sent[h] != now.date():
+                try:
+                    url = "https://api.binance.com/api/v3/ticker/24hr"
+                    data = requests.get(url).json()
+                    usdt = [x for x in data if x["symbol"].endswith("USDT")]
+                    top10 = sorted(usdt, key=lambda x: float(x["quoteVolume"]), reverse=True)[:10]
+                    msg = "🏆 *TOP 10 krypto (wolumen, Binance):*\n"
+                    for t in top10:
+                        msg += f"{t['symbol']}: ${float(t['lastPrice']):.6f} ({float(t['priceChangePercent']):+.2f}%)\n"
+                    send_signal("Top10 Krypto", msg)
+                    last_sent[h] = now.date()
+                except Exception as e:
+                    print("❌ Błąd top10:", e)
+        time.sleep(60)
+
+# ============== MODUŁ 6: Watchlist raport co 15 minut ================
+def watchlist_report_thread():
+    print("🟢 Watchlist raport start")
+    while True:
+        try:
+            msg = "👀 *Obserwowane krypto:*\n"
+            for pair in WATCHLIST:
+                url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={pair}"
+                data = requests.get(url).json()
+                price = float(data['lastPrice'])
+                change = float(data['priceChangePercent'])
+                msg += f"{pair}: ${price:.6f} ({change:+.2f}%)\n"
+            send_signal("Watchlist", msg)
+        except Exception as e:
+            print("❌ Błąd Watchlist:", e)
+        time.sleep(WATCHLIST_INTERVAL)
+
+# ============== MODUŁ 7: TradingView Webhook + Dashboard ===========
 app = Flask(__name__)
 
 HTML_TEMPLATE = """
@@ -313,7 +345,8 @@ if __name__ == "__main__":
     threading.Thread(target=ai_prediction_thread, daemon=True).start()
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=daily_report_thread, daemon=True).start()
+    threading.Thread(target=top10_report_thread, daemon=True).start()
+    threading.Thread(target=watchlist_report_thread, daemon=True).start()
     print("🚀 Crypto SuperBot Ultimate uruchomiony!")
     while True:
         time.sleep(60)
-
