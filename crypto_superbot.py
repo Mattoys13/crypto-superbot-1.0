@@ -19,14 +19,12 @@ bot = telebot.TeleBot(API_KEY)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# === KONFIGURACJA ===
+# === KONFIGURACJA CZĘSTOTLIWOŚCI ===
 PUMP_PERCENT = 5
 PUMP_INTERVAL = 5
-SCAN_INTERVAL = 60
-VOLUME_SPIKE_FACTOR = 3
-AI_PREDICT_INTERVAL = 3600  # co godzinę
-TECH_ANALYSIS_INTERVAL = 300
-DAILY_REPORT_HOUR = 20  # raport o 20:00
+SCAN_INTERVAL = 300        # Pump Detector co 5 minut (zmień według potrzeb)
+AI_PREDICT_INTERVAL = 4*3600  # AI Prediction co 4 godziny (zmień według potrzeb)
+DAILY_REPORT_HOUR = 20     # Dzienny raport o 20:00
 
 KRAKEN_PAIRS = ["XBTUSDT", "ETHUSDT", "SOLUSDT"]
 COINBASE_PAIRS = ["BTC-USDT", "ETH-USDT", "SOL-USDT"]
@@ -60,7 +58,7 @@ def check_pump(df, symbol):
     recent = df.tail(PUMP_INTERVAL)
     price_change = ((recent["close"].iloc[-1] - recent["close"].iloc[0]) / recent["close"].iloc[0]) * 100
     avg_volume = recent["volume"].iloc[:-1].mean()
-    vol_spike = recent["volume"].iloc[-1] > avg_volume * VOLUME_SPIKE_FACTOR
+    vol_spike = recent["volume"].iloc[-1] > avg_volume * 3
 
     if price_change >= PUMP_PERCENT or vol_spike:
         msg = f"🚨 *Pump Alert!* {symbol}\n" \
@@ -121,13 +119,13 @@ def gpt_comment(coin, current, pred):
         f"Opisz sentyment/trend rynku i możliwe powody zmiany ceny w 2-3 zdaniach (krótko, rzeczowo, po polsku):"
     )
     try:
-        resp = openai.ChatCompletion.create(
+        resp = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=120,
             temperature=0.5,
         )
-        return resp["choices"][0]["message"]["content"].strip()
+        return resp.choices[0].message.content.strip()
     except Exception as e:
         return f"(Błąd GPT: {e})"
 
@@ -166,13 +164,13 @@ def gpt_sentyment(fear_value, fear_class):
         f"Oceń krótko nastroje rynku kryptowalut i czy to sprzyja kupnie/sprzedaży. Odpowiedz po polsku."
     )
     try:
-        resp = openai.ChatCompletion.create(
+        resp = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=80,
             temperature=0.6,
         )
-        return resp["choices"][0]["message"]["content"].strip()
+        return resp.choices[0].message.content.strip()
     except Exception as e:
         return f"(Błąd GPT: {e})"
 
@@ -318,3 +316,4 @@ if __name__ == "__main__":
     print("🚀 Crypto SuperBot Ultimate uruchomiony!")
     while True:
         time.sleep(60)
+
