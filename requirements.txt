@@ -3,6 +3,8 @@ pandas
 telebot
 flask
 scikit-learn
-openai
+openai>=1.0.0
 numpy
+
+
 
